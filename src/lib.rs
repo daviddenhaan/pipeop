@@ -1,3 +1,4 @@
+#![feature(trace_macros)]
 #[macro_export]
 macro_rules! pipe {
     (@accumulate_individual_pipes [$($callback:tt)*] [] |> $($pipes:tt)+) => ($crate::pipe!(
@@ -6,6 +7,10 @@ macro_rules! pipe {
 
     (@accumulate_individual_pipes [$($callback:tt)*] [$([ $($pipe:tt)* ])*] [$($buffer:tt)*] |> $($pipes:tt)+) => ($crate::pipe!(
         @accumulate_individual_pipes [$($callback)*] [$([ $($pipe)* ])* [$($buffer)*]] [] $($pipes)+
+    ));
+
+    (@accumulate_individual_pipes [$($callback:tt)*] [$($pipes:tt)*] [$($previous:tt)*] |>) => (::std::compile_error!(
+        "expected pipe after pipe operator \"|>\""
     ));
 
     (@accumulate_individual_pipes [$($callback:tt)*] [$([ $($pipe:tt)* ])*] [$($buffer:tt)*] $tt:tt $($tail:tt)*) => ($crate::pipe!(
@@ -28,8 +33,12 @@ macro_rules! pipe {
         @finish_expression [$($callback)*] [$($buffer)* $tt] |> $($pipes)+
     ));
 
-    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*] $tt:tt $($tail:tt)+) => ($crate::pipe!(
-        @accumulate_expression [$($callback)*] [$($buffer)* $tt] $($tail)+
+    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*] $tt:tt $($tail:tt)*) => ($crate::pipe!(
+        @accumulate_expression [$($callback)*] [$($buffer)* $tt] $($tail)*
+    ));
+
+    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*]) => (::std::compile_error!(
+        "expected at least one pipe after the pipeline item"
     ));
 
     (@accumulate_expression [$($callback:tt)*] $($tokens:tt)+) => ($crate::pipe!(
@@ -69,11 +78,9 @@ macro_rules! pipe {
         @finalize_pipe [ $($($has_try)? [try])? ] $($pipe)+
     ));
 
-    (@transform_pipe $pat:pat in $expr:expr) => ($crate::pipe!(
-        @finalize_pipe [] |$pat| $expr
-    ));
+    (@transform_pipe $pat:pat in $expr:expr) => ($crate::pipe!(@finalize_pipe [] |$pat| $expr));
 
-    (@transform_pipe |$($closure:tt)+) => ($crate::pipe!(@finalize_pipe [] |$($closure)+));
+    (@transform_pipe | $($closure:tt)+) => ($crate::pipe!(@finalize_pipe [] |$($closure)+));
 
     (@transform_pipe $expr:expr) => ($crate::pipe!(@finalize_pipe [] |item| $expr(item)));
 
