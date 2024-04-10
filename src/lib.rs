@@ -1,4 +1,3 @@
-#![feature(trace_macros)]
 #[macro_export]
 macro_rules! pipe {
     (@accumulate_individual_pipes [$($callback:tt)*] [] |> $($pipes:tt)+) => ($crate::pipe!(
