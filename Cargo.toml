@@ -1,6 +1,6 @@
 [package]
 name = "pipeop"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2021"
 authors = ["David <75451291+david-d-h@users.noreply.github.com>"]
 description = "Adding the pipe operator to Rust with a declarative macro."
