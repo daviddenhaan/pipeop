@@ -1,94 +1,114 @@
-#![no_std]
 #[macro_export]
 macro_rules! pipe {
-    // If no pipes were found, throw a comptime error and stop the compilation process, invalid usage was found.
-    (@accumulate_expression [$($expr:tt)*]) => (::std::compile_error!("failed to accumulate pipeline, missing pipes."));
-
-    // Found a pipe operator, the expression should now have been accumulated into
-    // an expression. Call the internal @accumulate_pipes rule.
-    (@accumulate_expression [$($expr:tt)+] |> $($tail:tt)+) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+] [] |> $($tail)+
+    (@accumulate_individual_pipes [$($callback:tt)*] [] |> $($pipes:tt)+) => ($crate::pipe!(
+        @accumulate_individual_pipes [$($callback)*] [] [] $($pipes)+
     ));
 
-    // Accumulate the next token into the expression buffer and recurse.
-    (@accumulate_expression [$($expr:tt)*] $token:tt $($tail:tt)*) => ($crate::pipe!(
-        @accumulate_expression [$($expr)* $token] $($tail)*
+    (@accumulate_individual_pipes [$($callback:tt)*] [$([ $($pipe:tt)* ])*] [$($buffer:tt)*] |> $($pipes:tt)+) => ($crate::pipe!(
+        @accumulate_individual_pipes [$($callback)*] [$([ $($pipe)* ])* [$($buffer)*]] [] $($pipes)+
     ));
 
-    // This arm matches a partial invocation of a pipe where `@` will be replaced by the
-    // value being passed through the pipeline.
-    (
-        @accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*]
-        |> $(:: $(@$($_:tt)* $prefixed:tt)?)? $ident:ident $(:: $path:ident)*
-        ($($l_arg:expr,)* $(ref $(@@$($__:tt)* $borrow:tt)?)? @ $(, $r_arg:expr)* $(,)?)
-        $($tail:tt)*
-    ) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+] [$($pipes)*
-            [|$($($borrow)? ref)? value| $($($prefixed)? ::)? $ident $(:: $path)* ($($l_arg,)* value, $($r_arg),*)]
-        ] $($tail)*
+    (@accumulate_individual_pipes [$($callback:tt)*] [$($pipes:tt)*] [$($previous:tt)*] |>) => (::std::compile_error!(
+        "expected pipe after pipe operator \"|>\""
     ));
 
-    // This arm matches a pipe that consists of only an identifier, this assumes the identifier is callable.
-    (
-        @accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*]
-        |> $(:: $(@$($_:tt)* $prefixed:tt)?)? $ident:ident $(:: $path:ident)*
-        $(|> $($tail:tt)*)?
-    ) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+]
-            [$($pipes)* [$($($prefixed)? ::)? $ident $(:: $path)*]
-        ] $(|> $($tail)*)?
+    (@accumulate_individual_pipes [$($callback:tt)*] [$([ $($pipe:tt)* ])*] [$($buffer:tt)*] $tt:tt $($tail:tt)*) => ($crate::pipe!(
+        @accumulate_individual_pipes [$($callback)*] [$([ $($pipe)* ])*] [$($buffer)* $tt] $($tail)*
     ));
 
-    // This arm matches a method invocation on the value currently going through the pipeline.
-    (@accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*] |> . $pipe:ident($($arg:expr),*) $($tail:tt)*) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+] [$($pipes)* [|value| value.$pipe($($($arg),*)?)]] $($tail)*
+    (@accumulate_individual_pipes [$($callback:tt)*] [$([ $($pipe:tt)* ])*] [$($buffer:tt)*]) => ($crate::pipe!(
+        $($callback)* [$([ $($pipe)* ])* [$($buffer)*]]
     ));
 
-    // This arm matches a method invocation without parentheses, and thus also without arguments.
-    (@accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*] |> . $pipe:ident $($tail:tt)*) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+] [$($pipes)* [|value| value.$pipe()]] $($tail)*
+    (@accumulate_individual_pipes [$($callback:tt)*] $($pipes:tt)+) => ($crate::pipe!(
+        @accumulate_individual_pipes [$($callback)*] [] $($pipes)+
     ));
 
-    // This arm matches a closure with a block.
-    (@accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*] |> |$ident:ident| $block:block $($tail:tt)*) => ($crate::pipe!(
-        @accumulate_pipes [$($expr)+] [$($pipes)* [|$ident| $block]] $($tail)*
+    (@accumulated_expr [$expr:expr] $($pipes:tt)+) => ($crate::pipe!(
+        @accumulate_individual_pipes [@make_pipeline [$expr]] $($pipes)*
     ));
 
-    // This arm matches a closure that evaluates an expression.
-    (@accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*] |> |$ident:ident| $($residual:tt)+) => ($crate::pipe!(
-        @accumulate_expr_closure_pipe [[$($expr)+]] [$($pipes)*] [$ident] [] $($residual)*
+    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*] $tt:tt |> $($pipes:tt)+) => ($crate::pipe!(
+        @finish_expression [$($callback)*] [$($buffer)* $tt] |> $($pipes)+
     ));
 
-    (@accumulate_pipes [$($expr:tt)+] [$($pipes:tt)*] |> |_| $($residual:tt)+) => ($crate::pipe!(
-        @accumulate_expr_closure_pipe [[$($expr)+]] [$($pipes)*] [_] [] $($residual)*
+    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*] $tt:tt $($tail:tt)*) => ($crate::pipe!(
+        @accumulate_expression [$($callback)*] [$($buffer)* $tt] $($tail)*
     ));
 
-    (@accumulate_expr_closure_pipe [$($carry:tt)*] [$($pipes:tt)*] [$($args:tt)*] [$($expression:tt)*] $(|> $($tail:tt)+)?) => ($crate::pipe!(
-        @accumulate_pipes $($carry)* [$($pipes)* [|$($args)*| $($expression)*]] $(|> $($tail)+)?
+    (@accumulate_expression [$($callback:tt)*] [$($buffer:tt)*]) => (::std::compile_error!(
+        "expected at least one pipe after the pipeline item"
     ));
 
-    (@accumulate_expr_closure_pipe [$($carry:tt)*] [$($pipes:tt)*] [$($args:tt)*] [$($expression:tt)*] $token:tt $($tail:tt)*) => ($crate::pipe!(
-        @accumulate_expr_closure_pipe [$($carry)*] [$($pipes)*] [$($args)*] [$($expression)* $token] $($tail)*
+    (@accumulate_expression [$($callback:tt)*] $($tokens:tt)+) => ($crate::pipe!(
+        @accumulate_expression [$($callback)*] [] $($tokens)+
     ));
 
-    // Create a closure that encapsulates the pipeline, so the pipeline can be reused.
-    (@accumulate_pipes [... $(as $(@$($_:tt)* $explicit:tt)? $ty:ty)?] [$($pipes:tt)+]) => ((
-        |item $($($explicit)? : $ty)?| $crate::pipe!(@accumulate_pipes [item] [$($pipes)+])
+    (@finish_expression [$($callback:tt)*] [$expr:expr] $($pipes:tt)+) => ($crate::pipe!(
+        $($callback)* [$expr] $($pipes)*
     ));
 
-    // No more pipes were found, execute all the pipes in order with the result of the previous,
-    // or the expression buffer if no previous piped-value exists and return the result.
-    (@accumulate_pipes [$expr:expr] [$([$($pipe:tt)+])+]) => ({
+    (@finish_expression [$($callback:tt)*] [] $($residual:tt)*) => (::std::compile_error!(
+        "tried to accumulate an expression for use in the pipeline but found none"
+    ));
+
+    (@finish_expression [$($callback:tt)*] [$($false_expr:tt)*] $($residual:tt)*) => (::std::compile_error!(
+        ::std::concat!("could not accumulate an expression for use in the pipeline, found: ", ::std::stringify!($($false_expr)*))
+    ));
+
+    (@make_pipeline [$expr:expr] [$([ $($pipe:tt)+ ])+]) => ({
         let current = $expr;
-        $(let current = $crate::call_with($($pipe)+, current);)+
+        $(
+            macro_rules! __pipeop_expand_to_current {() => (current)}
+            let current = $crate::pipe!(@transform_pipe $($pipe)+);
+        )+
         current
     });
 
-    (@accumulate_pipes [$($expr:tt)*] [$($pipes:tt)*] $($tail:tt)*) => (::std::compile_error!("found invalid pipe syntax"));
+    (@make_pipeline $($tokens:tt)+) => ($crate::pipe!(
+        @accumulate_expression [@accumulated_expr] $($tokens)*
+    ));
 
-    // Accepts any tokens and attempts to parse them as a pipeline.
+    (@transform_pipe $(<$ty:ty>)? . $($method:tt)+) => ($crate::pipe!(
+        @maybe_ends_with_try [@transform_pipe] [] |item $(: $ty)?| item.$($method)+
+    ));
+
+    (@transform_pipe [$(try $(@$($_:tt)* $has_try:tt)?)?] $($pipe:tt)+) => ($crate::pipe!(
+        @finalize_pipe [ $($($has_try)? [try])? ] $($pipe)+
+    ));
+
+    (@transform_pipe $pat:pat in $expr:expr) => ($crate::pipe!(@finalize_pipe [] |$pat| $expr));
+
+    (@transform_pipe | $($closure:tt)+) => ($crate::pipe!(@finalize_pipe [] |$($closure)+));
+
+    (@transform_pipe $expr:expr) => ($crate::pipe!(@finalize_pipe [] |item| $expr(item)));
+
+    (@transform_pipe $($pipe:tt)*) => (::std::compile_error!(
+        ::std::concat!("unknown pipe syntax: ", ::std::stringify!($($pipe)*))
+    ));
+
+    (@maybe_ends_with_try [$($callback:tt)*] [$($buffer:tt)*] ?) => ($crate::pipe!($($callback)* [try] $($buffer)*));
+
+    (@maybe_ends_with_try [$($callback:tt)*] [$($buffer:tt)*]) => ($crate::pipe!($($callback)* [] $($buffer)*));
+
+    (@maybe_ends_with_try [$($callback:tt)*] [$($buffer:tt)*] $tt:tt $($tail:tt)*) => ($crate::pipe!(
+        @maybe_ends_with_try [$($callback)*] [$($buffer)* $tt] $($tail)*
+    ));
+
+    (@finalize_pipe [$([ $modifier:tt ])*] $($pipe:tt)+) => ($crate::pipe!(
+        @apply_modifiers [$([ $modifier ])*] [$crate::call_with($($pipe)+, __pipeop_expand_to_current!())]
+    ));
+
+    (@apply_modifiers [[try] $($modifiers:tt)*] [$($pipe:tt)*]) => ($crate::pipe!(@apply_modifiers [$($modifiers)*] [$($pipe)*?]));
+
+    (@apply_modifiers [[$($unknown:tt)+] $($_:tt)*]) => (::std::compile_error!(
+        ::std::concat!("unknown modifier: ", ::std::stringify!($($unknown)*))
+    ));
+
+    (@apply_modifiers [] [$($pipe:tt)*]) => ($($pipe)*);
+
     ($($tokens:tt)+) => ($crate::pipe!(
-        @accumulate_expression [] $($tokens)*
+        @make_pipeline $($tokens)+
     ));
 
     // An empty pipeline results in a unit type.
@@ -97,4 +117,69 @@ macro_rules! pipe {
 
 pub fn call_with<T, R, F: FnOnce(T) -> R>(f: F, t: T) -> R {
     f(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::ParseIntError;
+    use std::ops::Add;
+
+    #[test]
+    fn fn_pipe() {
+        const fn add_one(to: i32) -> i32 {
+            to + 1
+        }
+        let result = pipe!(1 |> add_one);
+        assert_eq!(result, 2);
+    }
+
+    #[test]
+    fn closure_pipe() {
+        let result = pipe!(1 |> |item| item + 1);
+        assert_eq!(result, 2);
+    }
+
+    #[test]
+    fn method_invocation_pipe() {
+        let result = pipe!(1 |> .add(1));
+        assert_eq!(result, 2);
+    }
+
+    #[test]
+    fn explicit_type_expectation_in_method_invocation() {
+        let result = pipe!(1 |> <i32>.add(2) |> <i32>.add(1));
+        assert_eq!(result, 4);
+    }
+
+    #[test]
+    fn many_pipes() {
+        let result = pipe!(1i32
+            |> .add(1)
+            |> |item| item + 1
+            |> <i32>.add(1)
+        );
+
+        assert_eq!(result, 4);
+    }
+
+    #[test]
+    fn can_use_try_modifier() -> Result<(), ParseIntError> {
+        let result = pipe!("1" |> .parse::<u8>()?);
+        assert_eq!(result, 1u8);
+        Ok(())
+    }
+
+    #[test]
+    fn partial_invocation() {
+        let additive = 2;
+        let result = pipe!(1 |> item in Add::add(item, additive));
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn pat_in_partial_invocation() {
+        struct Test(bool);
+        let result = pipe!(Test(true) |> Test(it) in it);
+        assert_eq!(result, true);
+    }
 }

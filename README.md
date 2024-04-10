@@ -1,86 +1,65 @@
 # The pipe operator in Rust
 
 This crate is exactly what you expect it to be, the pipe operator in Rust.
-It's very simple, but effective nonetheless.
 
 ## Usage
 
-```rust
-fn println(message: String) {
-    println!("{message}");
-}
-
-fn greet(name: &'static str) -> String {
-    format!("Hello, {name}!")
-}
-
-pipe!("David" // any expression
-    |> greet
-    |> println
-);
-```
-
-### Partial invocation of pipes
-
-You can partially invoke pipes, the `@` token will be replaced by the value
-currently going through the pipeline. The `@` token can be in any position, 
-not just at the start or end.
+You can construct a "pipeline" by passing any expression and at least a
+single pipe into the `::pipeop::pipe!` macro. There are some special things
+you can do but, in its most basic form the macro tries to literally call
+your pipe with the item in the pipeline.
 
 ```rust
-fn println(message: &'static str, upcase: bool) {
-    let message = match upcase {
-        true => message.to_uppercase(),
-        false => message.to_string(),
-    };
-
-    println!("{message}");
+const fn add_one(to: i32) -> i32 {
+    to + 1
 }
 
-pipe!("Hello" |> println(@, true)); // will output "HELLO" to stdout
+let result = pipe!(1 |> add_one |> add_one);
+assert!(result, 3);
 ```
 
 ### Invoking methods on the item in the pipeline
 
-You can invoke methods on the item in the pipeline at any time by prefixing
-the method identifier by a `.`
+You can invoke methods on the item in the pipeline at any time by 
+prefixing the pipe with a `.`.
+
+This example calls the `add` method on the item in the pipelines
+with `1` as the single argument.
 
 ```rust
-fn println(message: String) {
-    println!("{message}");
-}
-
-// This is functionally the same as the "Partial invocation" example.
-pipe!("Hello" 
-    |> .to_uppercase
-    |> println
-);
+use std::ops::Add;
+pipe!(1 |> .add(1));
 ```
 
 ### Closure based pipes
 
 You can also use closures as pipes, so you don't have to define a
-whole new function for every simple operation. 
-
-Both types of closures are valid, you can have a closure that just
-evaluates an expression, or you can have a whole code block.
+whole new function for every simple operation. Both types of closures are valid, you can have a closure that just
+evaluates an expression, or you can have a whole block of code.
 
 ```rust
-pipe!("Hello"
-    |> .to_uppercase
-    |> |value| println!("{value}")
+pipe!("Hello!"
+    |> .to_uppercase()
+    |> |item| in println!("{}", item)
 );
 ```
 
-### Storing the pipeline in a reusable closure
-
-To store a pipeline in a closure you can put `...` where you would normally
-put the pipe's initial value.
+You can also make closure based pipes look a little nicer
+by using this syntax instead.
 
 ```rust
-let f = pipe!(... as &'static str |> .to_uppercase);
-
-f("Hello"); // HELLO
+pipe!("Hello!"
+    |> .to_uppercase()
+    |> item in println!("{}", item)
+);
 ```
 
-**Note: often the type of the item can be inferred, in which case you can
-omit the `as type` part**
+You can of course accept a pattern in this "weird closure".
+This example extracts the inner `bool` value from the
+`Test` instance in the pipeline with pattern matching.
+
+```rust
+struct Test(bool);
+let result = pipe!(Test(true) |> Test(it) in it);
+assert_eq!(result, true);
+```
