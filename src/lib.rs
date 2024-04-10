@@ -40,8 +40,12 @@ macro_rules! pipe {
         $($callback)* [$expr] $($pipes)*
     ));
 
+    (@finish_expression [$($callback:tt)*] [] $($residual:tt)*) => (::std::compile_error!(
+        "tried to accumulate an expression for use in the pipeline but found none"
+    ));
+
     (@finish_expression [$($callback:tt)*] [$($false_expr:tt)*] $($residual:tt)*) => (::std::compile_error!(
-        "could not accumulate an expression for use in the pipeline"
+        ::std::concat!("could not accumulate an expression for use in the pipeline, found: ", ::std::stringify!($($false_expr)*))
     ));
 
     (@make_pipeline [$expr:expr] [$([ $($pipe:tt)+ ])+]) => ({
@@ -61,11 +65,21 @@ macro_rules! pipe {
         @maybe_ends_with_try [@transform_pipe] [] |item $(: $ty)?| item.$($method)+
     ));
 
-    (@transform_pipe [$(try $(@$($_:tt)* $has_try:tt)?)?] $($pipe:tt)*) => ($crate::pipe!(
-        @finalize_pipe [ $($($has_try)? [try])? ] $($pipe)*
+    (@transform_pipe [$(try $(@$($_:tt)* $has_try:tt)?)?] $($pipe:tt)+) => ($crate::pipe!(
+        @finalize_pipe [ $($($has_try)? [try])? ] $($pipe)+
     ));
 
+    (@transform_pipe $pat:pat in $expr:expr) => ($crate::pipe!(
+        @finalize_pipe [] |$pat| $expr
+    ));
+
+    (@transform_pipe |$($closure:tt)+) => ($crate::pipe!(@finalize_pipe [] |$($closure)+));
+
     (@transform_pipe $expr:expr) => ($crate::pipe!(@finalize_pipe [] |item| $expr(item)));
+
+    (@transform_pipe $($pipe:tt)*) => (::std::compile_error!(
+        ::std::concat!("unknown pipe syntax: ", ::std::stringify!($($pipe)*))
+    ));
 
     (@maybe_ends_with_try [$($callback:tt)*] [$($buffer:tt)*] ?) => ($crate::pipe!($($callback)* [try] $($buffer)*));
 
@@ -81,12 +95,9 @@ macro_rules! pipe {
 
     (@apply_modifiers [[try] $($modifiers:tt)*] [$($pipe:tt)*]) => ($crate::pipe!(@apply_modifiers [$($modifiers)*] [$($pipe)*?]));
 
-    (@apply_modifiers [[$($unknown:tt)+] $($_:tt)*]) => (
-        ::std::compile_error!(::std::concat!(
-            "unknown modifier: ",
-            ::std::stringify!($($unknown)*)),
-        )
-    );
+    (@apply_modifiers [[$($unknown:tt)+] $($_:tt)*]) => (::std::compile_error!(
+        ::std::concat!("unknown modifier: ", ::std::stringify!($($unknown)*))
+    ));
 
     (@apply_modifiers [] [$($pipe:tt)*]) => ($($pipe)*);
 
@@ -112,7 +123,6 @@ mod tests {
         const fn add_one(to: i32) -> i32 {
             to + 1
         }
-
         let result = pipe!(1 |> add_one);
         assert_eq!(result, 2);
     }
@@ -151,5 +161,19 @@ mod tests {
         let result = pipe!("1" |> .parse::<u8>()?);
         assert_eq!(result, 1u8);
         Ok(())
+    }
+
+    #[test]
+    fn partial_invocation() {
+        let additive = 2;
+        let result = pipe!(1 |> item in Add::add(item, additive));
+        assert_eq!(result, 3);
+    }
+
+    #[test]
+    fn pat_in_partial_invocation() {
+        struct Test(bool);
+        let result = pipe!(Test(true) |> Test(it) in it);
+        assert_eq!(result, true);
     }
 }
