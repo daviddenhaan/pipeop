@@ -40,7 +40,7 @@ evaluates an expression, or you can have a whole block of code.
 ```rust
 pipe!("Hello!"
     |> .to_uppercase()
-    |> |item| in println!("{}", item)
+    |> |item| println!("{}", item)
 );
 ```
 
